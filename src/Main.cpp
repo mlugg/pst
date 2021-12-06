@@ -26,9 +26,10 @@ IEngineTool *g_engineTool;
 IServerTools *g_serverTools;
 IServerGameDLL *g_serverGameDLL;
 
-int g_entParentOffset = -1;
+int g_viewEntOffset = -1;
 CEntInfo *g_gladosBody;
-void *g_player;
+edict_t *g_player;
+int g_lastViewHandle;
 
 static bool IsOnMap(const char *map) {
 	const char *name = g_engineTool->GetCurrentMap();
@@ -61,23 +62,16 @@ static int FindOffset(SendTable *table, const char *field) {
 	return -1;
 }
 
-CON_COMMAND(pst_set_offset_target, "DEBUG COMMAND, TO BE REMOVED") {
-	if (args.argc <= 1) return;
-	for (ServerClass *curClass = g_serverGameDLL->GetAllServerClasses(); curClass; curClass = curClass->next) {
-		if (!strcmp(curClass->networkName, "CPortal_Player")) {
-			g_entParentOffset = FindOffset(curClass->table, args.argv[1]);
-			return;
-		}
-	}
-}
-
 static void InitOffsets() {
+	g_viewEntOffset = 3648;
+	/*
 	for (ServerClass *curClass = g_serverGameDLL->GetAllServerClasses(); curClass; curClass = curClass->next) {
 		if (!strcmp(curClass->networkName, "CPortal_Player")) {
-			g_entParentOffset = FindOffset(curClass->table, "m_flAnimTime");
+			g_viewEntOffset = FindOffset(curClass->table, "m_flAnimTime");
 			return;
 		}
 	}
+	*/
 }
 
 class PST : public IServerPluginCallbacks {
@@ -103,7 +97,7 @@ public:
 		}
 
 		InitOffsets();
-		//if (g_entParentOffset == -1) return false;
+		if (g_viewEntOffset == -1) return false;
 
 		return true;
 	}
@@ -131,8 +125,16 @@ public:
 	virtual void GameFrame(bool simulating) {
 		if (!simulating) Timer::AddPauseTick();
 
-		// temporary debug shit
-		g_engineTool->Con_NPrintf(2, "0x%8x", *(int *)((char *)g_player + g_entParentOffset));
+		if (simulating && IsOnMap("testchmb_a_00")) {
+			void *player = g_player ? g_player->unk->GetBaseEntity() : nullptr;
+			if (player) {
+				int viewEntHandle = *(int *)((char *)player + g_viewEntOffset);
+				if (g_lastViewHandle != 0 && viewEntHandle != g_lastViewHandle && (viewEntHandle & ((1<<12)-1)) == 1) { // i.e. player edict
+					Timer::Start(0);
+				}
+				g_lastViewHandle = viewEntHandle;
+			}
+		}
 
 		if (simulating && g_gladosBody && !g_gladosBody->entity) {
 			g_gladosBody = nullptr;
@@ -148,7 +150,8 @@ public:
 	}
 
 	virtual void ClientActive(void *entity) {
-		g_player = entity;
+		g_player = (edict_t *)entity;
+		g_lastViewHandle = 0;
 
 		Timer::Resume();
 

@@ -297,6 +297,24 @@ struct CCommand {
 	const char *argv[64];
 };
 
+#define FL_EDICT_FULL (1<<2)
+
+struct IServerUnknown {
+	virtual ~IServerUnknown() {}
+	virtual void SetRefEHandle(const int &handle) = 0;
+	virtual const int &GetRefEHandle() const = 0;
+	virtual void *GetCollideable() = 0;
+	virtual void *GetNetworkable() = 0;
+	virtual void *GetBaseEntity() = 0;
+};
+
+struct edict_t {
+	int stateFlags;
+	int networkSerialNumber;
+	void *networkable;
+	IServerUnknown *unk;
+};
+
 #define CON_COMMAND(name, desc) \
 	static void name##_callback(const CCommand &); \
 	static ConCommand name(#name, desc, 0, &name##_callback); \
