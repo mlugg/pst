@@ -1,10 +1,22 @@
 #include "Main.hpp"
+#include "Rift.hpp"
 #include "SDK.hpp"
 #include "Timer.hpp"
 #include "Utils.hpp"
 
 #include <string.h>
 #include <stdlib.h>
+
+ICvar *g_cvar;
+IEngineTool *g_engineTool;
+IServerTools *g_serverTools;
+IServerGameDLL *g_serverGameDLL;
+
+int g_viewEntOffset = -1;
+CEntInfo *g_gladosBody;
+edict_t *g_player;
+int g_lastViewHandle;
+bool g_onScreenTimer = false;
 
 CON_COMMAND(pst_start, "pst_start [ticks] - manually start the timer") {
 	int ticks = 0;
@@ -20,18 +32,17 @@ CON_COMMAND(pst_stop, "pst_stop - manually stop the timer") {
 	Timer::Stop();
 }
 
+CON_COMMAND(pst_reset, "pst_reset - reset the timer") {
+	Timer::Reset();
+}
 
-ICvar *g_cvar;
-IEngineTool *g_engineTool;
-IServerTools *g_serverTools;
-IServerGameDLL *g_serverGameDLL;
+CON_COMMAND(pst_ost, "pst_ost [0|1] - enable or disable the on-screen timer") {
+	if (args.argc > 1) {
+		g_onScreenTimer = atoi(args.argv[1]) != 0;
+	}
+}
 
-int g_viewEntOffset = -1;
-CEntInfo *g_gladosBody;
-edict_t *g_player;
-int g_lastViewHandle;
-
-static bool IsOnMap(const char *map) {
+std::string GetMap() {
 	const char *name = g_engineTool->GetCurrentMap();
 
 	// Ignore the first 5 character if they're 'maps/' or 'maps\'
@@ -40,7 +51,7 @@ static bool IsOnMap(const char *map) {
 	// Ignore the last 4 characters '.bsp'
 	size_t len = strlen(name) - 4;
 
-	return !strncmp(name, map, len);
+	return std::string(name, len);
 };
 
 static int FindOffset(SendTable *table, const char *field) {
@@ -99,10 +110,13 @@ public:
 		InitOffsets();
 		if (g_viewEntOffset == -1) return false;
 
+		Rift::Init();
+
 		return true;
 	}
 
 	virtual void Unload() {
+		Rift::Cleanup();
 		g_cvar->UnregisterConCommands(g_cvarIdentifier);
 	}
 
@@ -123,9 +137,13 @@ public:
 	}
 
 	virtual void GameFrame(bool simulating) {
+		// Try to attach rift every frame til it works, since the reader has
+		// to open the fifo first for non-blocking operation
+		Rift::Attach();
+
 		if (!simulating) Timer::AddPauseTick();
 
-		if (simulating && IsOnMap("testchmb_a_00")) {
+		if (simulating && GetMap() == "testchmb_a_00") {
 			void *player = g_player ? g_player->unk->GetBaseEntity() : nullptr;
 			if (player) {
 				int viewEntHandle = *(int *)((char *)player + g_viewEntOffset);
@@ -141,7 +159,8 @@ public:
 			Timer::Stop();
 		}
 
-		g_engineTool->Con_NPrintf(0, "%s", Utils::FormatTime(Timer::GetTicks()).c_str());
+		if (g_onScreenTimer) g_engineTool->Con_NPrintf(0, "%s", Utils::FormatTime(Timer::GetTicks()).c_str());
+		Rift::Update(Timer::GetTicks());
 	}
 
 	virtual void LevelShutdown() {
@@ -155,14 +174,16 @@ public:
 
 		Timer::Resume();
 
-		if (IsOnMap("testchmb_a_00")) {
+		std::string map = GetMap();
+
+		if (map == "testchmb_a_00") {
 			if (GetServerTick() == 4260) {
 				Timer::Start(3533);
 			}
 		}
 
 		g_gladosBody = nullptr;
-		if (IsOnMap("escape_02")) {
+		if (map == "escape_02") {
 			for (CEntInfo *ent = g_serverTools->FirstEntity(); ent; ent = g_serverTools->NextEntity(ent)) {
 				char buf[16] = {0};
 				g_serverTools->GetKeyValue(ent, "targetname", buf, sizeof buf);

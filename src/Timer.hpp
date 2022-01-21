@@ -8,6 +8,7 @@
 namespace Timer {
 	void Start(uint32_t offset = 0);
 	void Stop();
+	void Reset(uint32_t offset = 0);
 
 	void Pause();
 	void Resume();
